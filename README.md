@@ -14,18 +14,7 @@ Slash-command bot that submits testnet faucet claims via QuickNode. Only **succe
 Create `.env`:
 
 ```bash
-DISCORD_TOKEN=xxxxxxxxxxxxxxxx
-APPLICATION_ID=000000000000000000
-GUILD_ID=000000000000000000
-FAUCET_CHANNEL_ID=000000000000000000   # required: commands only in this channel
-# BUILDER_ROLE_ID=000000000000000000   # optional extra gate
-
-QN_API_URL=https://api.faucet.quicknode.com
-QN_DISTRIBUTOR_KEY=xxxxxxxxxxxxxxxx
-
-EXPLORER_TX_URL=https://testnet.fluentscan.xyz/tx/   # trailing slash
-COOLDOWN_SECONDS=86400                               # 24h
-DB_PATH=./faucet.sqlite
+cp .env.example .env
 ```
 
 > Keep secrets out of git.
