@@ -15,6 +15,13 @@ const EXPLORER_TX_URL = process.env.EXPLORER_TX_URL; // e.g. https://testnet.flu
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const shortAddr = (a: string) => `${a.slice(0, 6)}...${a.slice(-3)}`;
+function formatWei(wei?: string | null): string {
+	if (!wei || !/^\d+$/.test(wei)) return '1.0 ETH';
+	const s = wei.padStart(19, '0');
+	const whole = s.slice(0, -18).replace(/^0+/, '') || '0';
+	const frac = s.slice(-18).replace(/0+$/, '');
+	return frac ? `${whole}.${frac} ETH` : `${whole} ETH`;
+}
 
 export default {
 	data: {
@@ -34,49 +41,47 @@ export default {
 	async execute(interaction) {
 		const address = interaction.options.getString('address', true);
 
-		// Minimal EVM address validation
 		if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
 			await interaction.reply({ content: '❌ Invalid EVM address.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 
-		// Acknowledge within 3s
 		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-		// Local cooldown check: only successful claims are stored
+		// Local cooldown (we store only successful claims)
 		const recent = getLastByUserInWindow(interaction.user.id, COOLDOWN_SECONDS);
 		if (recent) {
-			const next = new Date((recent.created_at + COOLDOWN_SECONDS) * 1000);
-			await interaction.editReply(`❌ Cooldown. Next available: ${next.toUTCString()}`);
+			const nextMs = (recent.created_at + COOLDOWN_SECONDS) * 1000;
+			const ts = Math.floor(nextMs / 1000);
+			await interaction.editReply(
+				`❌ Cooldown active\nNext claim: ${time(ts, TimestampStyles.RelativeTime)} • ${time(ts, TimestampStyles.LongDateTime)}`,
+			);
 			return;
 		}
 
 		try {
-			// Remote preflight
 			const pre = await canClaim(address, interaction.user.id);
 			if (!pre?.success || !pre.data?.canClaim) {
 				await interaction.editReply('❌ Cooldown/limit. Try again later.');
 				return;
 			}
 
-			// Submit claim
 			const created = await submitClaim(address, interaction.user.id);
 			const txId = created?.transactionId;
 			if (!txId) {
-				await interaction.editReply('⚠️ Service issue. Please try again later.');
+				await interaction.editReply('⚠️ Temporary service issue. Please try again later.');
 				return;
 			}
 
-			// Short poll for a real tx hash (best effort)
+			// Best-effort poll for tx hash
 			let txHash: string | undefined;
 			const deadline = Date.now() + 8_000;
 			while (Date.now() < deadline) {
-				await sleep(400);
+				await sleep(1_000);
 				const st = await getClaimStatus(txId);
 				const h = st?.data?.transactionHash || undefined;
 				if (h) {
 					txHash = h;
-					// Persist successful claim
 					recordSuccess({
 						discord_user_id: interaction.user.id,
 						guild_id: interaction.guildId ?? undefined,
@@ -91,29 +96,30 @@ export default {
 				if (st?.success === false) break;
 			}
 
-			const amount = pre.data?.amount ?? 1;
+			const amountLabel = formatWei(pre.data?.amountInWei);
 			const next = new Date(Date.now() + COOLDOWN_SECONDS * 1000);
+			const nextTs = Math.floor(next.getTime() / 1000);
 
 			const embed = new EmbedBuilder()
-				.setTitle(txHash ? '✅ Transaction Sent!' : '✅ Claim Submitted (processing)')
+				.setTitle(txHash ? '✅ Transaction sent' : '✅ Claim submitted')
 				.setDescription(
 					[
-						`**Amount:** ${amount} ETH`,
+						`**Amount:** ${amountLabel}`,
 						`**To:** \`${shortAddr(address)}\``,
 						txHash
 							? EXPLORER_TX_URL
 								? `**Tx:** ${EXPLORER_TX_URL}${txHash}`
 								: `**Tx:** ${txHash}`
-							: `**Tx:** processing…`,
+							: '**Tx:** processing…',
 						'',
-						`**Next request available:** ${time(Math.floor(next.getTime() / 1000), TimestampStyles.LongDateTime)}`,
+						`**Next claim:** ${time(nextTs, TimestampStyles.RelativeTime)} • ${time(nextTs, TimestampStyles.LongDateTime)}`,
 					].join('\n'),
 				);
 
 			await interaction.editReply({ content: '⏳ Processing your request...', embeds: [embed] });
 		} catch (e) {
 			console.error('claim error:', e);
-			await interaction.editReply('⚠️ Service issue. Please try again later.');
+			await interaction.editReply('⚠️ Temporary service issue. Please try again later.');
 		}
 	},
 } satisfies Command;

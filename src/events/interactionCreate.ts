@@ -1,38 +1,66 @@
+// src/events/interactionCreate.ts
 import { URL } from 'node:url';
-import { Events } from 'discord.js';
+import { Events, type ChatInputCommandInteraction, type GuildMember } from 'discord.js';
 import { loadCommands } from '../util/loaders.js';
 import type { Event } from './index.js';
 
-// Preload all command handlers from /commands
 const commands = await loadCommands(new URL('../commands/', import.meta.url));
 
-// Configure access via env
 const ALLOWED_GUILD_ID = process.env.GUILD_ID!;
+const FAUCET_CHANNEL_ID = process.env.FAUCET_CHANNEL_ID!;
+
 const BUILDER_ROLE_ID = process.env.BUILDER_ROLE_ID; // optional
+
+if (!ALLOWED_GUILD_ID) {
+	throw new Error('ALLOWED_GUILD_ID is required (set it in your environment).');
+}
+
+if (!FAUCET_CHANNEL_ID) {
+	throw new Error('FAUCET_CHANNEL_ID is required (set it in your environment).');
+}
+
+function memberHasRole(interaction: ChatInputCommandInteraction, roleId: string): boolean {
+	const m = interaction.member;
+	if (!m) return false;
+
+	// Case 1: GuildMember (has RoleManager with cache)
+	if ('roles' in m && (m as GuildMember).roles?.cache) {
+		return (m as GuildMember).roles.cache.has(roleId);
+	}
+	// Case 2: APIInteractionGuildMember (roles is string[] of role IDs)
+	const roles = (m as any).roles;
+	return Array.isArray(roles) && roles.includes(roleId);
+}
 
 export default {
 	name: Events.InteractionCreate,
 	async execute(interaction) {
-		// Only handle slash (chat input) commands
 		if (!interaction.isChatInputCommand()) return;
 
-		// Enforce: must be invoked inside the allowed guild
+		// Guild guard
 		if (!interaction.inGuild() || interaction.guildId !== ALLOWED_GUILD_ID) {
 			await interaction.reply({ content: 'This command is only available on the official server.', ephemeral: true });
 			return;
 		}
-		const guild = interaction.guild!;
 
-		// Optional: restrict by role (if provided)
-		if (BUILDER_ROLE_ID) {
-			const member = await guild.members.fetch(interaction.user.id);
-			if (!member.roles.cache.has(BUILDER_ROLE_ID)) {
-				await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-				return;
-			}
+		if (interaction.channelId !== FAUCET_CHANNEL_ID) {
+			await interaction.reply({
+				content: `Please use <#${FAUCET_CHANNEL_ID}> for this command.`,
+				ephemeral: true,
+			});
+			return;
 		}
 
-		// Route to concrete command handler
+		// Optional role guard
+		if (BUILDER_ROLE_ID && !memberHasRole(interaction, BUILDER_ROLE_ID)) {
+			await interaction.reply({
+				content: `You need the <@&${BUILDER_ROLE_ID}> role to use this command.`,
+				ephemeral: true,
+			});
+			return;
+		}
+
+		// Route to command
 		const command = commands.get(interaction.commandName);
 		if (!command) {
 			await interaction.reply({ content: 'Unknown command.', ephemeral: true });
@@ -42,7 +70,6 @@ export default {
 		try {
 			await command.execute(interaction);
 		} catch (error) {
-			// Centralized error handling for all commands
 			console.error(`Error executing /${interaction.commandName}:`, error);
 			if (interaction.deferred || interaction.replied) {
 				await interaction.editReply({ content: '⚠️ Unexpected error. Please try again later.' });
