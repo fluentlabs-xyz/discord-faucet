@@ -1,33 +1,26 @@
-import type { RESTPostAPIApplicationCommandsJSONBody, CommandInteraction } from 'discord.js';
+import type { ChatInputCommandInteraction, RESTPostAPIChatInputApplicationCommandsJSONBody } from 'discord.js';
 import { z } from 'zod';
 import type { StructurePredicate } from '../util/loaders.js';
 
 /**
- * Defines the structure of a command
+ * Defines the structure of a command.
  */
 export type Command = {
-	/**
-	 * The data for the command
-	 */
-	data: RESTPostAPIApplicationCommandsJSONBody;
-	/**
-	 * The function to execute when the command is called
-	 *
-	 * @param interaction - The interaction of the command
-	 */
-	execute(interaction: CommandInteraction): Promise<void> | void;
+	/** Slash command payload to register with Discord */
+	data: RESTPostAPIChatInputApplicationCommandsJSONBody;
+	/** Command handler for chat input interactions */
+	execute(interaction: ChatInputCommandInteraction): Promise<void> | void;
 };
 
 /**
- * Defines the schema for a command
+ * Runtime schema guard for Command.
+ * (Keep loose to allow any valid command JSON payload.)
  */
 export const schema = z.object({
 	data: z.record(z.any()),
 	execute: z.function(),
 });
 
-/**
- * Defines the predicate to check if an object is a valid Command type.
- */
+/** Type predicate used by dynamic loaders */
 export const predicate: StructurePredicate<Command> = (structure: unknown): structure is Command =>
 	schema.safeParse(structure).success;
